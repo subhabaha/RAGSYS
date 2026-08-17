@@ -1,0 +1,58 @@
+# Docker Compose service definitions.
+#
+# NOTE: Compose reads variable substitution from the `.env` file located next
+# to *this* compose file (not the caller's working directory). The deployment
+# workflow writes /opt/rag-system/.env before running `docker compose up`.
+services:
+  backend:
+    build: ../backend
+    image: ragsys-backend:latest
+    container_name: ragsys-backend
+    restart: unless-stopped
+    environment:
+      AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME}
+      AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY}
+      AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME}
+      COSMOS_DB_ENDPOINT: ${COSMOS_DB_ENDPOINT}
+      COSMOS_DB_KEY: ${COSMOS_DB_KEY}
+      COSMOS_DB_NAME: ${COSMOS_DB_NAME}
+      COSMOS_DB_CONTAINER_NAME: ${COSMOS_DB_CONTAINER_NAME}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY}
+      AZURE_OPENAI_DEPLOYMENT_NAME: ${AZURE_OPENAI_DEPLOYMENT_NAME}
+      AZURE_OPENAI_DEPLOYMENT_EMBEDDINGS_NAME: ${AZURE_OPENAI_DEPLOYMENT_EMBEDDINGS_NAME}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION}
+    networks:
+      - ragnet
+
+  upload-ui:
+    build: ../upload-ui
+    image: ragsys-upload-ui:latest
+    container_name: ragsys-upload-ui
+    restart: unless-stopped
+    networks:
+      - ragnet
+
+  query-ui:
+    build: ../query-ui
+    image: ragsys-query-ui:latest
+    container_name: ragsys-query-ui
+    restart: unless-stopped
+    networks:
+      - ragnet
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ragsys-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - ragnet
+
+networks:
+  ragnet:
+    driver: bridge
