@@ -31,6 +31,13 @@ export default function App() {
     }
   };
 
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      ask();
+    }
+  };
+
   return (
     <div className="container">
       <nav>
@@ -38,19 +45,25 @@ export default function App() {
         <a href="/query/">Query</a>
       </nav>
       <h1>Ask a question</h1>
-      <textarea
-        rows="3"
-        placeholder="Ask a question about your documents..."
-        value={question}
-        onChange={(e) => setQuestion(e.target.value)}
-      />
-      <div style={{ marginTop: 8 }}>
-        <button onClick={ask} disabled={loading || !question.trim()}>
-          {loading ? 'Thinking...' : 'Ask'}
-        </button>
+
+      <div className="ask-card">
+        <textarea
+          rows="3"
+          placeholder="Ask a question about your documents…  (⌘/Ctrl + Enter to send)"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <div className="ask-row">
+          <button onClick={ask} disabled={loading || !question.trim()}>
+            {loading ? (
+              <>Thinking<span className="dots"><span></span><span></span><span></span></span></>
+            ) : 'Ask'}
+          </button>
+        </div>
       </div>
 
-      {error && <div className="answer" style={{ color: '#991b1b' }}>{error}</div>}
+      {error && <div className="answer error">{error}</div>}
 
       {result && (
         <>
@@ -58,11 +71,13 @@ export default function App() {
           <div className="answer">{result.answer}</div>
 
           <h2>Sources</h2>
-          {result.sources.length === 0 && <div>No sources found.</div>}
+          {result.sources.length === 0 && <div className="no-sources">No sources found.</div>}
           {result.sources.map((s, i) => (
-            <div className="source" key={i}>
+            <div className="source" key={i} style={{ animationDelay: `${i * 80}ms` }}>
               <div className="meta">
-                <strong>{s.document_name}</strong> — page {s.page} · score {s.score.toFixed(3)}
+                <strong>{s.document_name}</strong>
+                <span>· page {s.page}</span>
+                <span className="score">score {s.score.toFixed(3)}</span>
               </div>
               <div className="text">{s.text}</div>
             </div>
