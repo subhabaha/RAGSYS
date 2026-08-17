@@ -1,0 +1,130 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p 22 -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync repo to server
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" "mkdir -p /opt/rag-system"
+          # Never embed credentials in git remote URLs — use rsync over SSH.
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_deploy" \
+            --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' \
+            ./ "$USER@$HOST":/opt/rag-system/
+
+      - name: Write .env beside docker-compose.yml
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+          AZURE_STORAGE_ACCOUNT_NAME: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+          AZURE_STORAGE_ACCOUNT_KEY: ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
+          AZURE_STORAGE_CONTAINER_NAME: ${{ secrets.AZURE_STORAGE_CONTAINER_NAME }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+          COSMOS_DB_KEY: ${{ secrets.COSMOS_DB_KEY }}
+          COSMOS_DB_NAME: ${{ secrets.COSMOS_DB_NAME }}
+          COSMOS_DB_CONTAINER_NAME: ${{ secrets.COSMOS_DB_CONTAINER_NAME }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+          AZURE_OPENAI_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
+          AZURE_OPENAI_DEPLOYMENT_EMBEDDINGS_NAME: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_EMBEDDINGS_NAME }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+        run: |
+          # Write .env locally then scp — avoids exposing values in `set -x` traces.
+          cat > .env.deploy <<EOF
+          AZURE_STORAGE_ACCOUNT_NAME=$AZURE_STORAGE_ACCOUNT_NAME
+          AZURE_STORAGE_ACCOUNT_KEY=$AZURE_STORAGE_ACCOUNT_KEY
+          AZURE_STORAGE_CONTAINER_NAME=$AZURE_STORAGE_CONTAINER_NAME
+          COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT
+          COSMOS_DB_KEY=$COSMOS_DB_KEY
+          COSMOS_DB_NAME=$COSMOS_DB_NAME
+          COSMOS_DB_CONTAINER_NAME=$COSMOS_DB_CONTAINER_NAME
+          AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT
+          AZURE_OPENAI_KEY=$AZURE_OPENAI_KEY
+          AZURE_OPENAI_DEPLOYMENT_NAME=$AZURE_OPENAI_DEPLOYMENT_NAME
+          AZURE_OPENAI_DEPLOYMENT_EMBEDDINGS_NAME=$AZURE_OPENAI_DEPLOYMENT_EMBEDDINGS_NAME
+          AZURE_OPENAI_API_VERSION=$AZURE_OPENAI_API_VERSION
+          EOF
+          # Compose resolves .env from the compose file's directory, not $PWD.
+          scp -i ~/.ssh/id_deploy .env.deploy "$USER@$HOST":/opt/rag-system/deployment/.env
+          rm -f .env.deploy
+
+      - name: Generate self-signed certs on server (idempotent)
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" \
+            "cd /opt/rag-system/deployment && chmod +x generate-certs.sh && ./generate-certs.sh"
+
+      - name: Verify compose config renders no empty values
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" bash -s <<'EOF'
+          set -euo pipefail
+          cd /opt/rag-system/deployment
+          # Render the fully-resolved config and fail the workflow if any
+          # environment value is empty.
+          rendered=$(docker compose --env-file .env config)
+          echo "$rendered" | awk '
+            /^[[:space:]]*environment:/ { in_env=1; next }
+            in_env && /^[[:space:]]*[A-Z_]+:[[:space:]]*"?"?[[:space:]]*$/ {
+              print "EMPTY ENV VALUE: " $0
+              found=1
+            }
+            in_env && /^[^[:space:]]/ { in_env=0 }
+            END { if (found) exit 1 }
+          '
+          EOF
+
+      - name: Build and start
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" bash -s <<'EOF'
+          set -euo pipefail
+          cd /opt/rag-system/deployment
+          docker compose --env-file .env pull nginx || true
+          docker compose --env-file .env up -d --build
+          EOF
+
+      - name: Wait for /health
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" bash -s <<'EOF'
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8080/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "Health check passed after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Health check did not return 200 within 60s"
+          docker compose --env-file /opt/rag-system/deployment/.env -f /opt/rag-system/deployment/docker-compose.yml logs --tail=200
+          exit 1
+          EOF
