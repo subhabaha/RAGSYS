@@ -11,6 +11,17 @@ function formatSize(n) {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [docs, setDocs] = useState([]);
   const [drag, setDrag] = useState(false);
@@ -78,7 +89,9 @@ export default function App() {
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
       >
-        <div>Drag &amp; drop PDFs here, or click to select</div>
+        <div className="dropzone-icon"><UploadIcon /></div>
+        <div className="dropzone-title">Drop PDFs to upload</div>
+        <div className="dropzone-sub">or click anywhere in this area to browse</div>
         <input
           ref={inputRef}
           type="file"
@@ -90,33 +103,35 @@ export default function App() {
       </div>
       {status && <div className="status">{status}</div>}
 
-      <table>
-        <thead>
-          <tr>
-            <th>Filename</th>
-            <th>Size</th>
-            <th>Status</th>
-            <th>Chunks</th>
-            <th>Uploaded</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {docs.length === 0 && (
-            <tr><td colSpan="6" style={{ textAlign: 'center', color: '#888' }}>No documents yet</td></tr>
-          )}
-          {docs.map((d) => (
-            <tr key={d.id}>
-              <td>{d.filename}</td>
-              <td>{formatSize(d.file_size)}</td>
-              <td><span className={`badge ${d.status}`}>{d.status}</span>{d.error ? ` — ${d.error}` : ''}</td>
-              <td>{d.chunks_count}</td>
-              <td>{d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : ''}</td>
-              <td><button className="danger" onClick={() => onDelete(d.id)}>Delete</button></td>
+      <div className="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Size</th>
+              <th>Status</th>
+              <th>Chunks</th>
+              <th>Uploaded</th>
+              <th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {docs.length === 0 && (
+              <tr className="empty-row"><td colSpan="6">No documents yet — drop a PDF above to get started</td></tr>
+            )}
+            {docs.map((d) => (
+              <tr key={d.id}>
+                <td>{d.filename}</td>
+                <td>{formatSize(d.file_size)}</td>
+                <td><span className={`badge ${d.status}`}>{d.status}</span>{d.error ? ` — ${d.error}` : ''}</td>
+                <td>{d.chunks_count}</td>
+                <td>{d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : ''}</td>
+                <td><button className="danger" onClick={() => onDelete(d.id)}>Delete</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
